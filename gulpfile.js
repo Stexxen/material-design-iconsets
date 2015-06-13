@@ -17,33 +17,77 @@ var gulpif = require('gulp-if');
 var del = require('del');
 
 var ICONSRC = "material-design-icons";
-var ORIGIN = "git://github.com/google/material-design-icons.git";
+var ICONSRC_GOOGLE = ICONSRC+'/google';
+var ICONSRC_COMMUNITY = ICONSRC+'/community';
+var ORIGIN_GOOGLE = "git://github.com/google/material-design-icons.git";
+var ORIGIN_COMMUNITY = "git://github.com/Templarian/MaterialDesign.git";
 var ICONDEST = "iconsets";
 
 gulp.task('init', function () {
-	mkdirp.sync(ICONSRC);
-	process.chdir(ICONSRC);
+	mkdirp.sync(ICONSRC_GOOGLE);
+	process.chdir(ICONSRC_GOOGLE);
 	exec(
 		'git init; ' +
 		'git config core.sparsecheckout true; ' +
 		'echo "*/svg/production/*_24px.svg" >> .git/info/sparse-checkout; ' +
-		'git remote add -f origin ' + ORIGIN);
+		'git remote add -f origin ' + ORIGIN_GOOGLE);
+	process.chdir('../../');
+	mkdirp.sync(ICONSRC_COMMUNITY);
+	process.chdir(ICONSRC_COMMUNITY);
+	exec(
+		'git init; ' +
+		'git config core.sparsecheckout true; ' +
+		'echo "/icons/svg/*.svg" >> .git/info/sparse-checkout; ' +
+		'git remote add -f origin ' + ORIGIN_COMMUNITY);
+
 });
 
 gulp.task('pull', function (cb) {
-	git.pull('origin', 'master', {cwd: ICONSRC}, function (err) {
+	git.pull('origin', 'master', {cwd: ICONSRC_GOOGLE}, function (err) {
 		if (err)
 			throw err;
-		else
-			cb();
+		else {
+			git.pull('origin', 'master', {cwd: ICONSRC_COMMUNITY}, function (err) {
+				if (err)
+					throw err;
+				else
+					cb();
+			});
+
+		}
 	});
 });
 
+gulp.task('build-community', ['pull'], function() {
+	return gulp.src(path.join(ICONSRC_COMMUNITY, '**', '*.svg'))
+			.pipe(xmlEdit(function (doc) {
+				delete doc.svg.$;
+
+				var test = {
+					g: doc.svg
+				};
+
+				test.g.$ = {id: 'REPLACEME'};
+
+			    delete test.g.path[0].$.fill;
+
+				return test;
+			}))
+			.pipe(tap(function (file,t) {
+				var iconName = path.basename(file.path).replace(/^|.svg/g, '');
+
+				file.contents = new Buffer(file.contents.toString().replace('REPLACEME', iconName));
+			}))
+			.pipe(concat('mdi-icons.svg'))
+			.pipe(insert.wrap('<svg>\n<defs>\n', '\n</defs>\n</svg>'))
+			.pipe(gulp.dest(ICONDEST));
+});
+
 gulp.task('build', ['pull'], function() {
-	var folders = getFolders(ICONSRC);
+	var folders = getFolders(ICONSRC_GOOGLE);
 
 	var tasks = folders.map(function (folder) {
-		return gulp.src(path.join(ICONSRC, folder, '**', '*.svg'))
+		return gulp.src(path.join(ICONSRC_GOOGLE, folder, '**', '*.svg'))
 			//.pipe(print())
 			.pipe(xmlEdit(function (doc) {
 				delete doc.svg.$;
@@ -74,7 +118,7 @@ gulp.task('clean', function(cb) {
 });
 
 gulp.task('cleanAll', function(cb) {
-	del([ICONSRC, ICONDEST], cb);
+	del([ICONSRC_GOOGLE, ICONSRC_COMMUNITY, ICONSRC, ICONDEST], cb);
 });
 
 function getFolders(dir){
